@@ -1,0 +1,28 @@
+# Ambiente Virtual
+venv/
+.venv/
+env/
+
+# Variáveis de Ambiente (contém chave de API)
+.env
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Dados e Índices (opcional - descomente se não quiser versionar)
+# data/
+# vectorstore/
+
+# IDE
+.vscode/
+.idea/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

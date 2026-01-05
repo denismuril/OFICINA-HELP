@@ -1,0 +1,22 @@
+# OFICINA-HELP - Sistema RAG para Manuais Técnicos
+# Dependências Python 3.10+
+
+# Interface Web
+streamlit>=1.28.0
+
+# Framework LangChain (Core + Google AI)
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-google-genai>=1.0.0
+
+# Vector Store
+faiss-cpu>=1.7.4
+
+# Processamento de PDFs
+pypdf>=3.17.0
+
+# Variáveis de Ambiente
+python-dotenv>=1.0.0
+
+# Tokenização (necessário para split de texto)
+tiktoken>=0.5.0

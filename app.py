@@ -11,7 +11,6 @@ Autor: Sistema OFICINA-HELP
 """
 
 import os
-import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -21,8 +20,9 @@ load_dotenv()
 import streamlit as st
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.chains.retrieval_qa.base import RetrievalQA
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 
 
 # ============================================================================
@@ -42,7 +42,7 @@ MARCAS_CONFIG = {
 }
 
 # Prompt do Sistema
-SYSTEM_PROMPT_TEMPLATE = """Você é um assistente técnico especializado em manuais de veículos da marca {marca}.
+SYSTEM_PROMPT = """Você é um assistente técnico especializado em manuais de veículos da marca {marca}.
 Sua função é auxiliar mecânicos respondendo perguntas técnicas com base EXCLUSIVAMENTE no conteúdo dos manuais fornecidos.
 
 REGRAS IMPORTANTES:
@@ -120,32 +120,21 @@ def carregar_vectorstore(marca: str):
     vectorstore = FAISS.load_local(
         str(caminho_indice),
         embeddings,
-        allow_dangerous_deserialization=True  # Necessário para carregar índices salvos
+        allow_dangerous_deserialization=True
     )
     return vectorstore
 
 
-def criar_chain_qa(vectorstore, marca: str):
-    """Cria a chain de Question-Answering."""
-    llm = carregar_llm()
-    
-    # Configura o prompt
-    prompt = PromptTemplate(
-        template=SYSTEM_PROMPT_TEMPLATE,
-        input_variables=["context", "question"],
-        partial_variables={"marca": marca}
-    )
-    
-    # Cria a chain de QA
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 4}),
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": prompt}
-    )
-    
-    return qa_chain
+def format_docs(docs):
+    """Formata os documentos para o contexto."""
+    formatted = []
+    for doc in docs:
+        source = doc.metadata.get("source_file", doc.metadata.get("source", "Desconhecido"))
+        page = doc.metadata.get("page", "N/A")
+        if "/" in str(source) or "\\" in str(source):
+            source = Path(source).name
+        formatted.append(f"[{source}, Página {page + 1 if isinstance(page, int) else page}]\n{doc.page_content}")
+    return "\n\n---\n\n".join(formatted)
 
 
 def formatar_fonte(doc) -> str:
@@ -154,7 +143,6 @@ def formatar_fonte(doc) -> str:
     arquivo = metadata.get("source_file", metadata.get("source", "Desconhecido"))
     pagina = metadata.get("page", "N/A")
     
-    # Se o source contém o caminho completo, pega só o nome do arquivo
     if "/" in str(arquivo) or "\\" in str(arquivo):
         arquivo = Path(arquivo).name
     
@@ -219,7 +207,6 @@ def main():
     
     with st.sidebar:
         st.header("⚙️ Configurações")
-        
         st.markdown("---")
         
         # Seleção de marca (obrigatória)
@@ -229,7 +216,7 @@ def main():
             "Escolha a montadora:",
             options=["-- Selecione --"] + list(MARCAS_CONFIG.keys()),
             index=0,
-            help="Selecione a marca do veículo para consultar o manual correspondente."
+            help="Selecione a marca do veículo para consultar o manual."
         )
         
         # Verifica se a marca foi selecionada
@@ -241,11 +228,11 @@ def main():
                 st.success(f"✅ Índice **{marca_selecionada}** carregado!")
             else:
                 st.error(f"❌ Índice **{marca_selecionada}** não encontrado!")
-                st.warning("""
+                st.warning(f"""
                 **Para criar o índice:**
-                1. Adicione os PDFs em `data/{marca}/`
+                1. Adicione os PDFs em `data/{marca_selecionada.lower()}/`
                 2. Execute: `python ingest.py`
-                """.format(marca=marca_selecionada.lower()))
+                """)
                 marca_valida = False
         else:
             st.warning("⚠️ Selecione uma marca para continuar")
@@ -299,27 +286,43 @@ def main():
             try:
                 # Carrega o vectorstore
                 vectorstore = carregar_vectorstore(marca_selecionada)
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
                 
-                # Cria a chain de QA
-                qa_chain = criar_chain_qa(vectorstore, marca_selecionada)
+                # Busca documentos relevantes
+                docs = retriever.invoke(pergunta)
                 
-                # Executa a consulta
-                resultado = qa_chain.invoke({"query": pergunta})
+                # Cria o contexto
+                context = format_docs(docs)
+                
+                # Cria o prompt
+                prompt = ChatPromptTemplate.from_template(SYSTEM_PROMPT)
+                
+                # Cria a chain
+                llm = carregar_llm()
+                chain = prompt | llm | StrOutputParser()
+                
+                # Executa
+                resposta = chain.invoke({
+                    "marca": marca_selecionada,
+                    "context": context,
+                    "question": pergunta
+                })
                 
                 # Exibe a resposta
                 st.markdown("---")
                 st.subheader("📝 Resposta")
-                st.markdown(resultado["result"])
+                st.markdown(resposta)
                 
                 # Exibe as fontes em um expansor
-                if resultado.get("source_documents"):
+                if docs:
                     with st.expander("📚 Ver Fontes", expanded=False):
-                        for i, doc in enumerate(resultado["source_documents"], 1):
+                        for i, doc in enumerate(docs, 1):
                             st.markdown(f"**Trecho {i}:**")
                             st.markdown(formatar_fonte(doc))
+                            content = doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content
                             st.text_area(
                                 label="",
-                                value=doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
+                                value=content,
                                 height=100,
                                 disabled=True,
                                 key=f"fonte_{i}"
@@ -338,7 +341,7 @@ def main():
     st.markdown(
         """
         <div style="text-align: center; color: #666; font-size: 0.8rem;">
-            🔧 OFICINA-HELP v1.0 | Sistema de Consulta a Manuais Técnicos | 
+            🔧 OFICINA-HELP v1.0 | Sistema de Consulta a Manuais Técnicos |
             Powered by Google Gemini & LangChain
         </div>
         """,

@@ -113,6 +113,7 @@ python ingest.py
 ```
 
 Este comando irá:
+
 - Ler todos os PDFs de cada pasta
 - Dividir o texto em chunks
 - Criar embeddings usando Google AI
@@ -187,3 +188,6 @@ Este projeto é para uso interno. Todos os manuais são de propriedade das respe
 ---
 
 **Desenvolvido com ❤️ para auxiliar mecânicos**
+
+---
+*Última sincronização testada: 2026-01-06 09:24*
